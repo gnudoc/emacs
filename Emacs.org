@@ -1,0 +1,1125 @@
+#+title: Emacs configuration edited for NixOS
+#+PROPERTY: header-args :tangle ./init.el :mkdirp yes
+#+STARTUP: content
+
+* Conventions
+Let's try and keep a readable, maintainable, modern, consistent style.
+ * We assume NixOS installs every needed package (=common/apps/emacs.nix=), so we don't have any =:ensure=.
+ * Make 1 use-package block per library, and the name is determined by the options being set (do C-h v on an option).
+   * That lets us use =nij/audit-custom=.
+ * Keyword order:
+   preface, after/defer/demand, init, hook, mode, bind, commands, custom, then config.
+ * Helper functions use the nij/ namespace, and live in the preface of their own block rather than being gathered together
+ * Global minor-modes - do =:init (foo-mode 1)= so that it runs even if the rest of the block is lazy.
+ * =defcustom= options go in :custom. Plain variables are =:config (setq foo 42)=. :custom values don't call the package's own functions
+ * hook, mode, bind and commands all make it lazy
+ * :defer t for when there are only settings to be loaded by another block
+ * Prefix keys - defvar-keymap maps.
+* All my bindings for reference
+| Keys    | Action                             |
+|---------+------------------------------------|
+| C-c e e | open Emacs.org                     |
+| C-c e r | restart emacs daemon               |
+| C-c n r | nixos-rebuild                      |
+| C-c n u | flake update                       |
+| C-c n g | nix garbage collect                |
+| C-c n b | system backup service              |
+| C-c n p | proced                             |
+| C-c n s | systemd units                      |
+| C-c n j | journal                            |
+| C-c o b | bluetooth                          |
+| C-c o e | elfeed                             |
+| C-c o t | ghostel                            |
+| C-c a   | org-agenda                         |
+| C-c c   | org-capture                        |
+| C-c l   | org store a link                   |
+| C-c r a | eglot code actions                 |
+| C-c r r | eglot rename                       |
+| C-c r f | eglot format                       |
+| C-c r o | eglot organise imports             |
+| C-.     | embark-act                         |
+| C-,     | embark-dwim                        |
+| C-h B   | search bindings (embark)           |
+| M-o     | other window                       |
+| M-s r   | consult ripgrep                    |
+| M-s l   | consult search lines               |
+| M-s f   | consult find files                 |
+| M-g i   | consult imenu                      |
+| M-g o   | consult outline headings           |
+| M-g f   | consult flymake diagnostics        |
+| M-g l   | jump to last change in this buffer |
+| C-x p n | scaffold a C++ project here        |
+| C-x p P | run cmake configure preset         |
+| C-S-o   | dired: open in next window         |
+| C-=     | pdf-tools zoom in                  |
+| C--     | pdf-tools zoom out                 |
+|-        |                                    |
+* Early-Init Config
+This section is tangled to =early-init.el=, which runs *before* package initialization and before the first frame is drawn.
+#+HEADER: :tangle ./early-init.el
+#+begin_src emacs-lisp
+  ;;; early-init.el --- runs before the first frame  -*- lexical-binding: t; -*-
+  ;; Generated from Emacs.org: edit that file, not this one.
+
+  ;; Collect garbage every 32 MB of allocation instead of every 800 kB (the
+  ;; default).  A fixed value, so there is nothing to reset once startup is over.
+  (setq gc-cons-threshold (* 32 1024 1024))
+  (setq inhibit-startup-message t)
+
+  ;; Disable UI elements before they are even drawn
+  (scroll-bar-mode -1)
+  (tool-bar-mode -1)
+  (tooltip-mode -1)
+  (menu-bar-mode -1)
+
+  ;; Set frame defaults early
+  (dolist (param '((alpha-background . 90)
+                   (fullscreen . maximized)
+                   (left-fringe . 5)
+                   (right-fringe . 5)
+                   (font . "JetBrainsMono Nerd Font-13")))
+    (add-to-list 'default-frame-alist param))
+#+end_src
+
+* Main Init Config
+This main section all gets tangled to init.el
+** Preamble
+Add a general intro to the init.el file.
+#+begin_src emacs-lisp
+  ;;; init.el --- generated from Emacs.org  -*- lexical-binding: t; -*-
+  ;; Edit Emacs.org, not this file: saving Emacs.org overwrites it.
+
+#+end_src
+** Core Emacs Config
+This section configures core Emacs behavior, fonts, and helper functions. Start by setting up ways to look for errors.
+*** Find silent errors
+=:custom= fails silently: a misspelt name, or a variable that isn't a user option, is recorded and never applied. =M-x nij/audit-custom= checks every variable set through =:custom= in this file. It loads each block's library first, so it takes a moment the first time. An empty list is the result to aim for.
+#+begin_src emacs-lisp
+  (defun nij/audit-custom ()
+    "Report variables set with use-package `:custom' that are not user options.
+  Each block's library is loaded first, so anything still listed is a
+  typo, a plain variable that wants `setq' in `:config', or an option
+  filed under a block that isn't the library defining it."
+    (interactive)
+    (let (suspects)
+      (pcase-dolist (`(,prop ,symbol . ,_) (get 'use-package 'theme-settings))
+        (when (eq prop 'theme-value)
+          ;; use-package records which block set the variable
+          (let ((comment (get symbol 'saved-variable-comment)))
+            (when (and (stringp comment)
+                       (string-match "use-package \\(.+\\)\\'" comment))
+              (ignore-errors (require (intern (match-string 1 comment))))))
+          (unless (custom-variable-p symbol)
+            (push symbol suspects))))
+      (message "Not user options: %S" suspects)))
+#+end_src
+*** No Littering
+By default, packages dump various files and dirs into =.emacs.d/= or =.config/emacs/= - let's make them use ./var and ./etc
+=no-littering-theme-backups= centralises backup and autosave files to =var/backup/=. However, for /sudo::/path/to/file, this would copy root-owned files to my $HOME, probably not what I want.
+#+begin_src emacs-lisp
+  (use-package no-littering
+    :preface
+    (defun nij/backup-enable-p (name)
+      "Return non-nil if file NAME should be backed up.
+  Like `normal-backup-enable-predicate', but not for a file opened
+  using TRAMP sudo/su/doas."
+      (and (normal-backup-enable-predicate name)
+           (not (member (file-remote-p name 'method) '("su" "sudo" "doas")))))
+    :config
+    (no-littering-theme-backups)
+    (setq backup-enable-predicate #'nij/backup-enable-p))
+#+end_src
+*** C Core Settings
+Some settings that belong to the C core, or core libraries that are always loaded.
+#+begin_src emacs-lisp
+  (use-package emacs
+    :init
+    (setq custom-file (locate-user-emacs-file "custom.el"))
+    (load custom-file :noerror :nomessage)
+    (column-number-mode 1)
+    :custom
+    (indent-tabs-mode nil)
+    (tab-always-indent 'complete)           ; TAB indents then completes
+    (text-mode-ispell-word-completion nil)  ; no dict words as completions
+    (use-short-answers t)
+    (visible-bell t)
+    (large-file-warning-threshold (* 200 1024 1024)) ; 200MB
+    (vc-handled-backends '(Git)))
+#+end_src
+*** Session memory
+This lets us keep a record of minibuffer activity, where point was, and what files have been opened.
+#+begin_src emacs-lisp
+  (use-package savehist
+    :init (savehist-mode 1))
+
+  (use-package saveplace
+    :init (save-place-mode 1))
+
+  (use-package recentf
+    :demand t
+    :custom
+    (recentf-max-saved-items 200)
+    (recentf-autosave-interval 300) ; in seconds
+    :config
+    ;; --- needs the library loaded already to add the exclusions to the list ---
+    (dolist (dir (list no-littering-var-directory no-littering-etc-directory))
+      (add-to-list 'recentf-exclude (recentf-expand-file-name dir)))
+    (recentf-mode 1))
+#+end_src
+*** Basic UI Tweaks
+Configuring the parts of the basic look and feel, like line numbers and scrolling, that aren't defined in the C core and don't need to be in place at early-init 
+#+begin_src emacs-lisp
+  (use-package pixel-scroll
+    :init (pixel-scroll-precision-mode 1))
+
+  (use-package visual-wrap
+    :init (global-visual-wrap-prefix-mode 1))
+
+  (use-package display-line-numbers
+    :hook (prog-mode conf-mode))
+#+end_src
+*** Font Configuration
+We'll set our preferred fonts, which nix provides.
+#+begin_src emacs-lisp
+  (use-package faces
+    :config
+    (set-face-attribute 'fixed-pitch nil
+                        :family "JetBrainsMono Nerd Font"
+                        :height 1.0)      ;scale to match `default', set at 13pt 
+    (set-face-attribute 'variable-pitch nil
+                        :family "Noto Sans"
+                        :height 1.1))
+#+end_src
+*** Secrets & Passphrases
+Login secrets are all securely stored at /run/agenix/authinfo, which is decrypted with agenix. .authinfo and .authinfo.gpg are no longer needed, nor is pinentry.
+#+begin_src emacs-lisp
+  (use-package auth-source
+    :defer t
+    :custom
+    (auth-sources '("/run/agenix/authinfo" "~/.netrc"))
+    (auth-source-cache-expiry nil))
+
+  (use-package epg-config
+    :defer t
+    :custom
+    (epg-pinentry-mode 'loopback))
+#+end_src
+*** Desktop Notifications
+Send notifications over DBus via =notifications.el=, avoiding needing external libnotify / notify-send.
+In eshell, we can do (notifications-notify :title "bla" :body "bla")
+The command in any script or prompt on ghostel (including in an ssh session in ghostel) is:
+printf '\e]777;notify;%s;%s\e\\' "Title" "Body of the message"
+#+begin_src emacs-lisp
+  (use-package notifications
+    :preface
+    (defun nij/startup-notif ()
+      "When we do `nij/restart-emacs', it restarts silently as a systemd service.
+  So let the user know it's done."
+        (when (daemonp)
+          (notifications-notify
+           :title "Emacs Daemon Up"
+           :body (format "Ready in %s" (emacs-init-time "%.2f seconds")))))
+    :hook (emacs-startup . nij/startup-notif)
+    :commands notifications-notify)
+#+end_src
+*** Personal Bindings
+Collection of some useful keybindings.
+Beware of adding more keys to a defvar-keymap in a live session - the variable won't get changed as it already exists.
+To live edit it (or any other defvar-keymap):
+- open the block with =C-c '=
+- put point in the defvar-keymap form
+- do =C-M-x (eval-defun)=
+#+begin_src emacs-lisp
+  ;; ibuffer is just better than standard list-buffers
+  (use-package ibuffer
+    :bind ([remap list-buffers] . ibuffer))
+
+  (use-package repeat
+    :init (repeat-mode 1))
+
+  ;; --- C-c e for emacs-config ---
+  (defun nij/open-config ()
+    "Open the Emacs.org configuration file."
+    (interactive)
+    (find-file (locate-user-emacs-file "Emacs.org")))
+
+  (defun nij/restart-emacs ()
+    "Save some buffers, warn re unsaved ones and restart emacs.
+  If we're daemonised then restart via systemd, else the normal `restart-emacs'"
+    (interactive)
+    (save-some-buffers)
+    (when (seq-some (lambda (buf) (and (buffer-file-name buf)
+                                       (buffer-modified-p buf)))
+                    (buffer-list))
+      (unless (yes-or-no-p "Unsaved buffer(s); restart anyway? ")
+          (user-error "Custom restart function aborted due to unsaved buffer(s)")))
+    (if (daemonp)
+        (let ((default-directory "/"))
+          (call-process "systemctl" nil 0 nil "--user" "--no-block" "restart" "emacs.service"))
+      (restart-emacs)))
+
+  (defvar-keymap nij-emacs-config-map
+    :doc "Keys relating to the configuration of Emacs itself"
+    "e" #'nij/open-config
+    "r" #'nij/restart-emacs)
+  (keymap-global-set "C-c e" (cons "Emacs config" nij-emacs-config-map))
+
+  ;; --- C-c n for Nix and System config ---
+  ;; We skip the #hostname at the end of the command to let nix just build for the current machine, as usual.
+  (defun nij/nixos-rebuild-switch ()
+    "Run NixOS rebuild in a compilation buffer."
+    (interactive)
+    (compile "sudo nixos-rebuild switch --flake ~/.config/nixos-config" t))
+
+  (defun nij/nix-flake-update ()
+    "Update flake locks in a compilation buffer."
+    (interactive)
+    (let ((default-directory "~/.config/nixos-config/"))
+      (compile "nix flake update")))
+
+  (defun nij/nix-garbage-collect ()
+    "Run Nix garbage collection in a compilation buffer."
+    (interactive)
+    (compile "sudo nix-collect-garbage -d" t))
+
+  (defun nij/system-backup ()
+    "Run the system backup script manually using a comint buffer.
+  See /etc/systemd/system/system-backup.service for more."
+    (interactive)
+    (compile "sudo systemctl start system-backup.service; sudo journalctl --unit=system-backup.service --lines=40 --no-pager" t))
+
+  (defvar-keymap nij-system-map
+    :doc "Keys relating to common admin tasks for the underlying system"
+    "r" #'nij/nixos-rebuild-switch
+    "u" #'nij/nix-flake-update
+    "g" #'nij/nix-garbage-collect
+    "p" #'proced
+    "b" #'nij/system-backup)
+  (keymap-global-set "C-c n" (cons "Nix & System" nij-system-map))
+
+  ;; Systemd and Journalctl are under C-c n as well
+  (use-package daemons
+    :bind (:map nij-system-map
+           ("s" . daemons)))
+  
+  (use-package journalctl-mode
+    :bind (:map nij-system-map
+           ("j" . journalctl)))
+
+  (defvar-keymap nij-open-apps-map
+    :doc "Keys for opening mini-apps")
+  (keymap-global-set "C-c o" (cons "Open Tools & Apps" nij-open-apps-map))
+
+#+end_src
+*** Jump to Last Change
+Identify where in a buffer I was most recently editing, using the =buffer-undo-list=
+=(BEG . END)= records an insertion.
+=(TEXT . POSITION)= records a deletion.
+~C-u C-SPC~ goes back to where point was.
+#+begin_src emacs-lisp
+  (defun nij/goto-last-change ()
+      "Move point to the most recent change in this buffer.
+    The mark is left where point was."
+      (interactive)
+      (let ((pos (and (listp buffer-undo-list)   ; t means undo is off in this buffer
+                      (seq-some
+                       (lambda (entry)
+                         (pcase entry
+                           ;; insertion: (BEG . END)
+                           (`(,(pred integerp) . ,(and (pred integerp) end)) end)
+                           ;; deletion: (TEXT . POSITION), negative if point was at the end
+                           (`(,(pred stringp) . ,(and (pred integerp) pos)) (abs pos))))
+                       buffer-undo-list))))
+        (unless pos
+          (user-error "No change recorded in this buffer"))
+        (push-mark)
+        (goto-char pos)))
+
+  (keymap-set goto-map "l" #'nij/goto-last-change) ; M-g l
+#+end_src
+*** Global Auto-revert
+I have some autorevert settings in the dired block but it would be worth having auto-revert globally for eg file buffers, so that changes on disk are reflected immediately in buffer.
+#+begin_src emacs-lisp
+  (use-package autorevert
+    :init (global-auto-revert-mode 1))
+#+end_src
+*** Editorconfig
+If a project has a .editorconfig, this Emacs 30 setting overrides some settings such as default indentations.
+#+begin_src emacs-lisp
+  (use-package editorconfig
+    :init (editorconfig-mode 1))
+#+end_src
+** Hardware
+*** Bluetooth
+Manage Bluetooth devices directly via BlueZ and D-Bus using [[https://codeberg.org/rstocker/emacs-bluetooth][bluetooth.el]].
+Allows device management without leaving Emacs or spawning external terminals for =bluetoothctl=
+Common keys: 'P' (pair), 't' (trust), 'c' (connect), 'd' (disconnect), 'k' (kill), 'r' (start scan), 'R' (stop scan)
+#+begin_src emacs-lisp
+  (use-package bluetooth
+    :bind (:map nij-open-apps-map ("b" . bluetooth-list-devices)))
+#+end_src
+* More UI and UX Config
+This section mostly gets tangled to init.el, except for the sh block that goes to etc/eshell/aliases, and the C++ templates that tangle to etc/templates/cpp/
+** Theming, Completion and Help
+*** Window Layout
+I like a frame to have one main window to the left, and a column of small windows on the right - a bit like a WM master-stack layout.
+The right-hand column is a good place for help-type buffers and compile-type buffers.
+We can mostly control this with built-ins:
+=C-x w s= hide/unhide the whole right-hand column
+=M-o= or =C-x o= move to next window
+=C-x O= move to prev window
+=C-c <left>= and =C-c <right>= to undo and redo a window layout.
+Also worth looking at =C-x w t=, as well as the =C-x w o=, =C-x w r= and =C-x w f= maps.
+#+begin_src emacs-lisp
+  (use-package window
+    :bind ("M-o" . other-window)
+    :custom
+    (display-buffer-alist
+     '( ;bottom right, 40% width; compile, comint, grep
+       ((or "\\*compilation\\*"
+            (derived-mode . compilation-mode))
+        (display-buffer-reuse-window display-buffer-in-side-window); the 2 possible actions
+        (side . right) (slot . 1) (window-width . 0.4)
+        (window-parameters (no-delete-other-windows . t)))
+       ; top right, 40% width; help etc, eshell
+       ((or (derived-mode . help-mode)
+            (derived-mode . Info-mode)
+            "\\*\\(?:.+-\\)?eshell\\*" ; because eshell shows its buffer before setting the mode
+            "\\*eldoc.*\\*")
+        (display-buffer-reuse-window display-buffer-in-side-window); the 2 possible actions
+        (side . right) (slot . -1) (window-width . 0.4)
+        (window-parameters (no-delete-other-windows . t))))))
+
+  (use-package winner
+    :init (winner-mode 1))
+#+end_src
+*** Colour Theme
+Take suggestions from [[https://github.com/hlissner/emacs-doom-themes][doom-themes]]
+#+begin_src emacs-lisp
+  (use-package doom-themes
+    :config (load-theme 'doom-tokyo-night t))
+#+end_src
+*** TODO Modeline
+Another element of doom emacs that's nice is [[https://github.com/seagle0128/doom-modeline][modeline]].
+TODO: Can I improve it, make it look nicer and / or make it more functional?
+TODO: Or should I make my own version entirely? The built-in pieces are =mode-line-format= and, new in 31, =mode-line-collapse-minor-modes=.
+ * display-time-mode is probably unnecessary, if I can put the date into waybar along with the time
+ * system load average is unnecessary (=display-time-default-load-average=)
+ * The text coding system (utf-8) and end-of-line style are unnecessary
+ * display-battery-mode is duplication of waybar, strictly speaking, but I do find it useful to be there as well as on waybar
+ * What other things may be useful?
+#+begin_src emacs-lisp
+  (use-package doom-modeline
+    :init (doom-modeline-mode 1)
+    :custom
+    (doom-modeline-battery t)
+    (doom-modeline-time t)
+    (doom-modeline-vcs-max-length 12))
+
+  (use-package battery
+    :init (display-battery-mode 1))
+
+  (use-package time
+    :init (display-time-mode 1)
+    :custom
+    (display-time-format "%H:%M"))
+#+end_src
+*** Which Key
+[[https://github.com/justbur/emacs-which-key][which-key]] offers all completions for any key prefix - now part of default emacs.
+#+begin_src emacs-lisp
+  (use-package which-key
+    :init (which-key-mode 1)
+    :custom
+    (which-key-idle-delay 0.5)
+    ;; next line lets embark give us searchable instead of paged long menus of commands
+    (which-key-use-C-h-commands nil))
+#+end_src
+*** Minibuffer completion
+**** Built-in minibuffer completion - we used to use vertico
+The built-in stuff is pretty good now.
+In the minibuffer: =C-n= / =C-p= or the up and down arrows pick a candidate, =RET= accepts it, and left and right still move within what I typed.
+=SPC= is unbound so that it types a space. By default it tries to complete a word, which gets in the way of orderless's space-separated terms.
+#+begin_src emacs-lisp
+  (use-package minibuffer
+    :bind (:map minibuffer-local-completion-map
+           ("SPC" . nil)
+           ("C-n" . minibuffer-next-completion)
+           ("C-p" . minibuffer-previous-completion))
+    :custom
+    (completion-eager-display t)
+    (completion-eager-update t)
+    (completions-format 'one-column)
+    (completions-max-height 15)
+    (completions-sort 'historical)
+    (completions-detailed t)                 ; annotations beside each candidate
+    (completions-header-format nil)
+    (completion-show-help nil)
+    (minibuffer-visible-completions 'up-down))
+#+end_src
+**** Orderless
+The completion style, allowing flexible, out-of-order matching
+#+begin_src emacs-lisp
+  (use-package orderless
+    :custom
+    (completion-styles '(orderless basic))
+    (completion-category-overrides '((file (styles . (basic partial-completion)))))
+    :config
+    ;; A plain variable, not a user option, hence `setq'
+    (setq completion-category-defaults nil))
+#+end_src
+**** Consult
+Search and Nav functions
+#+begin_src emacs-lisp
+  (use-package consult
+    :bind (([remap switch-to-buffer] . consult-buffer)
+           ([remap switch-to-buffer-other-window] . consult-buffer-other-window)
+           ([remap project-switch-to-buffer] . consult-project-buffer)
+           ([remap goto-line] . consult-goto-line)
+           ([remap yank-pop] . consult-yank-pop)
+           ("M-s r" . consult-ripgrep)
+           ("M-s l" . consult-line)
+           ("M-s f" . consult-fd)
+           ("M-g i" . consult-imenu)
+           ("M-g o" . consult-outline)       ; jump between headings in org-mode
+           ("M-g f" . consult-flymake)
+           :map minibuffer-local-map
+           ("C-r" . consult-history)))
+#+end_src
+**** Embark
+Contextual items for the completion results
+=C-.= and =C-,= sit next to each other on the top row of the left hand in Dvorak, away from the pinky that is holding Ctrl. Org binds =C-,= itself, so the Org block gives it back.
+#+begin_src emacs-lisp
+  (use-package embark
+    :init
+    ;; A plain variable, not a user option, hence `setq'
+    (setq prefix-help-command #'embark-prefix-help-command)
+    :bind (("C-." . embark-act)
+           ("C-," . embark-dwim)             ; "Do What I Mean"
+           ("C-h B" . embark-bindings)))
+
+  (use-package embark-consult
+    :after (embark consult)
+    :hook (embark-collect-mode . consult-preview-at-point-mode))
+#+end_src
+*** Helpful replaced with built-in help.
+[[https://github.com/Wilfred/helpful][Helpful]] is really not needed anymore. The inbuilt C-h keys  (describe-* commands) do the job really well.
+C-h ={a,f,k,s,u,v,x}= are all quite useful. =s= and =i= in help buffers is also really useful.
+** TODO Org Mode
+The famous magic [[https://orgmode.org][Org Mode]]. All sorts of functions. Rich doc editing, project planning, task/time tracking, literate coding, blogging engine, and more.
+TODO I definitely need to learn to use org-mode well.
+*** Basic Config
+Fonts, per-buffer display, and the babel languages. conf-unix does key-value pairs (eg life=42). More info [[https://orgmode.org/worg/org-contrib/babel/languages.html][here]].
+The font function runs in =:config=, so it is set once for the session, not unnecessarily re-set per org buffer.
+The =cmake= and =json= entries tell Org which major mode to use for the template blocks in the C++ section.
+#+begin_src emacs-lisp
+  (use-package org
+    :preface
+    (defun nij/org-font-setup ()
+      "Heading sizes, and fixed-pitch faces for the parts of Org that need them."
+      (dolist (face '((org-level-1 . 1.3)
+                      (org-level-2 . 1.2)
+                      (org-level-3 . 1.1)
+                      (org-level-4 . 1.05)
+                      (org-level-5 . 1.0)
+                      (org-level-6 . 1.0)
+                      (org-level-7 . 1.0)
+                      (org-level-8 . 1.0)))
+        (set-face-attribute (car face) nil :weight 'regular :height (cdr face)))
+      (set-face-attribute 'org-block nil :inherit 'fixed-pitch)
+      (set-face-attribute 'org-code nil :inherit '(shadow fixed-pitch))
+      (set-face-attribute 'org-table nil :inherit '(shadow fixed-pitch))
+      (set-face-attribute 'org-verbatim nil :inherit '(shadow fixed-pitch))
+      (set-face-attribute 'org-special-keyword nil :inherit '(font-lock-comment-face fixed-pitch))
+      (set-face-attribute 'org-meta-line nil :inherit '(font-lock-comment-face fixed-pitch))
+      (set-face-attribute 'org-checkbox nil :inherit 'fixed-pitch))
+    (defun nij/org-mode-setup ()
+      "Per-buffer display settings for Org."
+      (org-indent-mode 1)
+      (variable-pitch-mode 1)
+      (visual-line-mode 1)
+      (visual-wrap-prefix-mode -1))
+    :hook (org-mode . nij/org-mode-setup)
+    :bind (("C-c l" . org-store-link)
+           :map org-mode-map
+           ("C-," . nil))                    ; leave C-, to embark-dwim; C-' does the same job
+    :custom
+    (org-ellipsis " ▾")
+    (org-directory "~/org/")
+    (org-agenda-files '("~/org/"))           ; every .org file in that directory
+    :config
+    (make-directory org-directory t)
+    (nij/org-font-setup)
+    (org-babel-do-load-languages
+     'org-babel-load-languages
+     '((emacs-lisp . t)
+       (nix . t)
+       (shell . t)))
+    (dolist (lang '(("conf-unix" . conf-unix)
+                    ("cmake" . cmake-ts)
+                    ("json" . js-json)))
+      (add-to-list 'org-src-lang-modes lang)))
+#+end_src
+*** Tasks: agenda and capture
+Starting small. Everything lives in =~/org/=, and for now that means one file, =tasks.org=, with a top-level heading per area: Home network and Life admin today, Freelance later. Capture creates the file and the headings the first time they are needed.
+- =C-c c= captures a task without leaving what I'm doing. =h= files it under Home network, with a link back to wherever I was (useful when the job is "fix this config file"). =l= files it under Life admin. Then =C-c C-c= saves it and =C-c C-k= abandons it.
+- =C-c a t= lists every open TODO. =C-c a a= shows the week: anything given a date with =C-c C-s= (scheduled) or =C-c C-d= (deadline) on its heading.
+- In the agenda, =t= changes a task's state and =RET= goes to it.
+To add an area: one more heading in =tasks.org= and one more line in =org-capture-templates=. The manual's chapters are =(info "(org) Capture")= and =(info "(org) Agenda Views")=.
+#+begin_src emacs-lisp
+  (use-package org-agenda
+    :bind ("C-c a" . org-agenda))
+
+  (use-package org-capture
+    :bind ("C-c c" . org-capture)
+    :custom
+    ;; key, description, type, where it goes, template:
+    ;; %? is where point ends up, %U a timestamp, %a a link to where I was
+    (org-capture-templates
+     '(("h" "Home network job" entry (file+headline "tasks.org" "Home network")
+        "* TODO %?\n%U\n%a")
+       ("l" "Life admin" entry (file+headline "tasks.org" "Life admin")
+        "* TODO %?\n%U"))))
+#+end_src
+*** Org & Markdown
+#+begin_src emacs-lisp
+  (use-package markdown-mode
+    :mode ("README\\.md\\'" . gfm-mode))
+
+  ;; For exporting Org to MkDocs-compatible Markdown
+  (use-package ox-gfm
+    :after org)
+#+end_src
+*** Org Modern
+Use org-modern for enhanced display. Consider putting some of the setq variables from https://github.com/minad/org-modern into :config
+#+begin_src emacs-lisp
+  (use-package org-modern
+    :hook (org-mode))
+#+end_src
+*** Structure Templates
+This allows us to type <el TAB or <sh TAB and so on to get code blocks inserted into org docs. You can even use it for the custom bits like :tangle or :mkdirp if needed.
+More [[https://orgmode.org/manual/Structure-Templates.html][here]].
+#+begin_src emacs-lisp
+  (use-package org-tempo
+    :after org
+    :config
+    (dolist (src-temp '(("sh" . "src shell")
+                        ("el" . "src emacs-lisp")
+                        ("nix" . "src nix")))
+      (add-to-list 'org-structure-template-alist src-temp)))
+#+end_src
+** Dev Stuff
+*** Languages and eglot
+Back to basics - C++, Nix and Emacs Lisp for now. Each language section below holds its own modes and tools; the eglot block lists which modes get a language server.
+Language servers: =nixd= is in home.packages (=emacs.nix=). =clangd= comes from each C++ project's flake, through envrc. A language gets its line in the eglot hook when its server is installed, and not before: a hook without a server is an error every time a file opens.
+**** Tree-sitter Language Grammars
+We no longer use [[https://github.com/renzmann/treesit-auto][treesit-auto]] - in emacs 31+, =treesit-enabled-modes= exists and does the job.
+#+begin_src emacs-lisp
+  (use-package treesit
+    :defer t
+    :custom
+    (treesit-enabled-modes t)
+    (treesit-font-lock-level 4)
+    (treesit-auto-install-grammar 'never))   ; Nix supplies the grammars
+#+end_src
+**** Language Server (Eglot)
+The  LSP client. Eglot finds lang servers (like =clangd= and =nixd=) on our PATH, which envrc sets per project.
+Its keys are under =C-c r=. =C-c l= is taken, globally, by =org-store-link=.
+#+begin_src emacs-lisp
+  (use-package eglot
+    :preface
+    (defvar nij/eglot-format-on-save-modes '(c-ts-base-mode nix-mode) ; don't try to edit this for a live session
+      "Major modes whose buffers Eglot formats before saving.")
+    (defun nij/eglot-format-on-save ()
+      "Format before saving, but only while Eglot manages the buffer."
+      (if (and (eglot-managed-p)
+               (derived-mode-p nij/eglot-format-on-save-modes))
+          (add-hook 'before-save-hook #'eglot-format-buffer nil t)
+        (remove-hook 'before-save-hook #'eglot-format-buffer t)))
+    :hook
+    ((c-ts-base-mode nix-mode) . eglot-ensure)   ; lisps don't want LSPs
+    (eglot-managed-mode . nij/eglot-format-on-save)
+    :bind (:map eglot-mode-map
+           ("C-c r a" . eglot-code-actions)
+           ("C-c r r" . eglot-rename)
+           ("C-c r f" . eglot-format)
+           ("C-c r o" . eglot-code-action-organize-imports))
+    :config
+    (which-key-add-keymap-based-replacements eglot-mode-map "C-c r" "Refactor etc")
+    ;; A plain (buffer-local) variable, not a user option, hence `setq-default'
+    (setq-default eglot-workspace-configuration
+                  '(:nixd (:formatting (:command ["nixfmt"])))))
+#+end_src
+**** C, C++, cmake, clang
+C, C++ and cmake settings - using the newer treesitter modes for syntax, and gdb-mi for debugging.
+=C-x p n= scaffolds a project in the current directory and =C-x p P= runs cmake's configure preset.
+The clang-tidy checks are no longer scaffolded into every project as a =.clangd= file. They live in =~/.config/clangd/config.yaml=, which home-manager writes (=emacs.nix=). A project can still override them with a =.clangd= of its own.
+#+begin_src emacs-lisp
+  (defvar nij/cpp-template-directory (locate-user-emacs-file "etc/templates/cpp/")
+    "Directory holding the files that `nij/create-cpp-project' copies.
+  They are tangled from the Templates blocks in Emacs.org.")
+
+  (defun nij/create-cpp-project ()
+    "Scaffold a C++23 project (CMake, Ninja, Nix dev shell) in this directory.
+  Every file in `nij/cpp-template-directory' is copied here, with
+  {{project}} replaced by the name of this directory.  A template called
+  dot-NAME becomes .NAME.  Files that already exist are left alone."
+    (interactive)
+    (unless (file-directory-p nij/cpp-template-directory)
+      (user-error "No templates in %s; save Emacs.org to tangle them"
+                  nij/cpp-template-directory))
+    (let ((name (file-name-nondirectory (directory-file-name default-directory)))
+          files)
+      (dolist (template (directory-files nij/cpp-template-directory t
+                                         directory-files-no-dot-files-regexp))
+        (let ((file (replace-regexp-in-string
+                     "\\`dot-" "." (file-name-nondirectory template))))
+          (push file files)
+          (unless (file-exists-p file)
+            (with-temp-file (expand-file-name file)
+              (insert-file-contents template)
+              (while (search-forward "{{project}}" nil t)
+                (replace-match name t t))))))
+      ;; Inside a git repository, a flake only sees the files git knows about
+      (when (locate-dominating-file default-directory ".git")
+        (unless (eql 0 (apply #'process-file "git" nil nil nil "add" "--" files))
+          (message "git add failed; the flake may not see the new files")))
+      (message "C++ project '%s' scaffolded." name)
+      ;; Build the dev shell in a compilation buffer so we can watch, then
+      ;; pick up the new environment and open main.cpp
+      (with-current-buffer (compile "direnv allow && direnv exec . true")
+        (add-hook 'compilation-finish-functions
+                  (lambda (_buffer status)
+                    (when (string-prefix-p "finished" status)
+                      (envrc-reload)
+                      (find-file "main.cpp")))
+                  nil t))))             ; t: only for this compilation buffer
+
+  (defun nij/cmake-configure-preset ()
+    "Run 'cmake --preset default' in the project root."
+    (interactive)
+    (let ((default-directory (project-root (project-current t))))
+      (compile "cmake --preset default")))
+
+  (keymap-set project-prefix-map "n" #'nij/create-cpp-project)
+  (keymap-set project-prefix-map "P" #'nij/cmake-configure-preset)
+
+  (use-package gdb-mi
+    :defer t
+    :custom
+    (gdb-many-windows t)                     ; Use the IDE-like layout
+    (gdb-show-main t))                       ; Start display at main()
+#+end_src
+***** Templates
+The files a new project starts with. Each block is tangled to =etc/templates/cpp/=, so it is edited here, in its own major mode (=C-c '=), and takes effect as soon as this file is saved. ={{project}}= stands for the project's name. The two dotfiles are stored as =dot-...= so that the templates directory doesn't itself look like a direnv project.
+To change what every new project gets, edit a block. To add a file, add a block.
+#+begin_src cmake :tangle ./etc/templates/cpp/CMakeLists.txt
+  cmake_minimum_required(VERSION 4.1)
+
+  project({{project}} LANGUAGES CXX)
+
+  set(CMAKE_CXX_STANDARD 23)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
+  add_executable({{project}} main.cpp)
+  target_compile_options({{project}} PRIVATE
+      -Wall
+      -Wextra
+      -Wpedantic
+      -Wshadow
+      -Wconversion
+      -Wsign-conversion
+      -Werror
+  )
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+      target_compile_options({{project}} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+      target_link_options({{project}} PRIVATE -fsanitize=address,undefined)
+  endif()
+#+end_src
+#+begin_src json :tangle ./etc/templates/cpp/CMakePresets.json
+  {
+    "version": 4,
+    "configurePresets": [
+      {
+        "name": "default",
+        "generator": "Ninja",
+        "binaryDir": "${sourceDir}/build",
+        "cacheVariables": {
+          "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+          "CMAKE_BUILD_TYPE": "Debug"
+        }
+      }
+    ]
+  }
+#+end_src
+#+begin_src C++ :tangle ./etc/templates/cpp/main.cpp
+  #include <iostream>
+
+  int main() {
+      std::cout << "Hello from {{project}}!\n";
+      return 0;
+  }
+#+end_src
+#+begin_src nix :tangle ./etc/templates/cpp/flake.nix
+  {
+    description = "C++23 Dev Environment";
+    inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    outputs = { self, nixpkgs }: {
+      devShells.x86_64-linux.default = let
+        pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      in pkgs.mkShell.override { stdenv = pkgs.llvmPackages_latest.stdenv; } {
+        packages = with pkgs; [
+          cmake
+          ninja
+          llvmPackages_latest.clang-tools
+          gdb
+        ];
+      };
+    };
+  }
+#+end_src
+#+begin_src sh :tangle ./etc/templates/cpp/dot-envrc
+  use flake
+#+end_src
+#+begin_src lisp-data :tangle ./etc/templates/cpp/dot-dir-locals.el
+  ((nil . ((compile-command . "ninja -C build"))))
+#+end_src
+**** Nix
+Major mode for nix files
+#+begin_src emacs-lisp
+  (use-package nix-mode
+    :mode "\\.nix\\'")
+#+end_src
+*** Completion (Corfu)
+A lightweight, fast, and modern completion UI
+=cape= provides extra completion at point functions
+Review =M-x describe-keymap RET corfu-map= for more as well
+#+begin_src emacs-lisp
+  (use-package nerd-icons-corfu
+    :after corfu
+    :config
+    (add-to-list 'corfu-margin-formatters #'nerd-icons-corfu-formatter))
+
+  (use-package corfu
+    :preface
+    (defun nij/corfu-eshell-setup ()
+      "Disable auto-completion in Eshell and enable Corfu manually."
+      (setq-local corfu-auto nil)
+      (corfu-mode 1))
+    :init
+    (global-corfu-mode 1)
+    (corfu-popupinfo-mode 1)
+    (corfu-history-mode 1)                   ; ranks options by what's previously been chosen
+    :hook (eshell-mode . nij/corfu-eshell-setup)
+    :custom
+    (corfu-auto t)
+    (corfu-auto-prefix 2)
+    (corfu-auto-delay 0.2)                   ; corfu README says 0 delay too small
+    (corfu-cycle t)
+    (corfu-popupinfo-delay 0.5)              ; Show extra info in a popup
+    (corfu-preselect 'prompt))
+
+  (use-package cape
+    :init
+    ;; Add cape's functions to Emacs's built-in completion-at-point-functions
+    (dolist (fn '(cape-keyword cape-dabbrev cape-file)) ; we can add others to the list if needed
+      (add-hook 'completion-at-point-functions fn)))
+#+end_src
+** Envrc
+Envrc.el hooks into =direnv= giving us *buffer-local* envs for dev stuff. How awesome is that! See =https://github.com/purcell/envrc=
+Its README asks for it to be the last global mode switched on. =emacs-startup-hook= runs after everything in this file, and after the daemon has started its server, so a problem here can't stop Emacs from coming up.
+#+begin_src emacs-lisp
+  (use-package envrc
+    :hook (emacs-startup . envrc-global-mode)
+    :custom
+    ;; when envrc finds no .envrc, it resets, then grabs the PATH, but it grabs emacs' local path, which doesn't
+    ;; work if you're ssh'd.
+    (envrc-update-on-eshell-directory-change nil))
+#+end_src
+** TODO Project.el
+I still need to learn how to use this - at the moment I'm not convinced that I'm using it properly. The idea is to automatically define a directory and its subdirs as a single workspace. By default Project goes up the dir tree and the project dir is the first dir containing a .git (ie it's the git repo). But we can set additional identifiers too, so here we say that if we find a .envrc, that defines a mini-project, and we should treat that level as the root of the Project.
+=C-x p p= - switch to any of the projects Project already knows about
+=C-x p f= - C-x C-f but looks throughout the project
+=C-x p d= - C-x d but at the root of the project
+=C-x p c= - M-x compile but at the project root
+=C-x p e= - M-x eshell but at the project root
+=C-x p b= - C-x b but only shows the buffers associated with the current project
+=C-x p g= - search regexp across all the files of the project
+=C-x p r= - replace regexp across all the files of the project
+#+begin_src emacs-lisp
+  (use-package project
+    :defer t
+    :custom
+    (project-vc-extra-root-markers '(".envrc")))
+#+end_src
+** Version Control (Magit)
+Forge, which helps magit use git forges like github, can read authinfo for authentication
+#+begin_src emacs-lisp
+  (use-package magit
+    :defer t
+    :custom
+    (magit-display-buffer-function #'magit-display-buffer-same-window-except-diff-v1))
+  (use-package forge
+    :after magit); so that it doesn't load at startup
+#+end_src
+** Rainbow Delimiters
+#+begin_src emacs-lisp
+  (use-package rainbow-delimiters
+    :hook (prog-mode))
+#+end_src
+** File Management (dired)
+Some slight customisations.
+=dired-omit-mode= - we could add the regexp "^\\.[^.]" to =dired-omit-files= to hide dotfiles.
+Consider =(dired-kill-when-opening-new-dired-buffer t)= if we get annoyed by the multiple dired buffers.
+=dired-do-open= is a built-in and set to =E= - directly open binary files in the xdg-open program.
+Dired's options are spread over three libraries, hence three blocks.
+#+begin_src emacs-lisp
+  (use-package dired
+    :preface
+    (defun nij/dired-open-in-next-window ()
+      "Open the current file in the next open window, without creating a new split."
+      (interactive)
+      (let ((file (dired-get-file-for-visit))
+            (other-win (next-window)))
+        (if (eq other-win (selected-window))
+            (message "There is no other window open!")
+          (select-window other-win)
+          (find-file file))))
+    :bind (:map dired-mode-map
+           ("C-S-o" . nij/dired-open-in-next-window))
+    :custom
+    (dired-listing-switches "-alh --group-directories-first")
+    (dired-dwim-target t)
+    (dired-auto-revert-buffer t))
+
+  (use-package dired-aux                     ; copying, renaming and friends
+    :defer t
+    :custom
+    (dired-vc-rename-file t)
+    (dired-create-destination-dirs 'ask))
+
+  (use-package wdired
+    :defer t
+    :custom
+    (wdired-allow-to-change-permissions t))
+
+  (use-package nerd-icons-dired
+    :hook (dired-mode))
+#+end_src
+** Remote Access (TRAMP)
+Settings to keep remote editing quick, mostly by stopping Emacs from doing extra work on remote files.
+The old trouble with zsh on the remote end is fixed on the remote end: its =.zshrc= starts with a guard that gives TRAMP a plain prompt when =TERM= is "dumb" (see the FAQ in the TRAMP manual). Nothing here chooses a remote shell any more.
+Three of the options in the first block aren't TRAMP's own: =password-cache-expiry= comes from password-cache, which TRAMP loads, and the last two from libraries that are always loaded. =tramp-use-connection-share= belongs to tramp-sh, which only loads when a connection is made, so it has a block of its own.
+#+begin_src emacs-lisp
+  (use-package tramp
+    :defer t
+    :custom
+    (tramp-verbose 1)                        ; Reduce logging overhead
+    (password-cache-expiry 1800)             ; number = seconds. default is 16. nil for infinite
+    (remote-file-name-inhibit-cache nil)
+    ;; Don't bother with git stuff on remote files
+    (vc-ignore-dir-regexp (format "\\(%s\\)\\|\\(%s\\)"
+                                  locate-dominating-stop-dir-regexp
+                                  tramp-file-name-regexp)))
+
+  (use-package tramp-sh                      ; the ssh, scp and sudo methods
+    :defer t
+    :custom
+    (tramp-use-connection-share nil))        ; leave Control* and Proxy* options to my ssh config
+#+end_src
+** TODO RSS
+TODO: Learn to use elfeed
+I am self-hosting miniflux, which exports a fever api that elfeed can use.
+#+begin_src emacs-lisp
+  ;; Base Elfeed setup
+  (use-package elfeed
+    :bind (:map nij-open-apps-map
+                ("e" . elfeed))
+    :custom
+    ;; Set a default search filter (e.g., unread articles from the last month)
+    (elfeed-search-filter "@1-month-ago +unread")
+    (elfeed-feeds '(("fever+https://nij@flux.gnudoc.uk"
+                          :api-url "https://flux.gnudoc.uk/fever/"
+                          :use-authinfo t)))
+    (elfeed-use-curl t)
+    (elfeed-log-level 'info)) ; 'debug is helpful for initial connection testing
+
+  ;; Miniflux synchronization
+  (use-package elfeed-protocol
+    :after elfeed
+    :demand t
+    :config
+    (elfeed-protocol-enable))
+
+#+end_src
+** TODO PDF Tools
+From [[https://github.com/vedang/pdf-tools][PDF Tools]] - it is awesome, but it needs libpoppler, poppler-glib and epdfinfo on the host system.
+Should we replace this? Is emacs-reader ready? Is the inbuilt docview tool good enough now?
+#+begin_src emacs-lisp
+  (use-package pdf-tools
+    :init (pdf-loader-install)
+    :bind (:map pdf-view-mode-map
+                ("C-=" . pdf-view-enlarge)
+                ("C--" . pdf-view-shrink)))
+#+end_src
+** TODO Terminals
+*** Ghostel
+A terminal based on Ghostty, which is written in zig and uses the kitty display stuff. Cross-platform, doesn't need to compile the external module on platforms where you can't compile.
+Why not vterm? No external module needed, so that's already a good enough reason, but it's supposedly faster than vterm, and supposedly prettier (something about colours and fonts rendering, and inline images), and  supposedly integrates better with emacs - more modes (not just normal mode and copy mode), understands more elisp, and emacs understands what directory it's in, and understands where the prompts in the terminal are. Supposedly we might get the benefits we hoped for from EAT, and possibly even the benefits of being emacs-native that eshell has. A basic config of (use-package ghostel) is already functional, if our experiments get messy.
+#+begin_src emacs-lisp
+  (use-package ghostel
+    :preface
+    (defun nij/ghostel-notify (title body)
+      "Show TITLE and BODY from a ghostel terminal as a desktop notification."
+      (notifications-notify :title (if (string-empty-p title) (buffer-name) title)
+                            :body body))
+    :bind (:map nij-open-apps-map
+                ("t" . ghostel))
+    :custom
+    (ghostel-notification-functions '(nij/ghostel-notify))
+    :config
+    ;; Append custom commands to the default ghostel-eval-cmds list, which includes
+    ;; find-file, find-file-other-window, dired, dired-other-window
+    (dolist (cmd '(("magit-status" magit-status)
+                   ("consult-ripgrep" consult-ripgrep)
+                   ("project-find-file" project-find-file)
+                   ("ediff" ediff)))
+      (add-to-list 'ghostel-eval-cmds cmd))
+    )
+
+  (use-package ghostel-eshell
+    :hook (eshell-load . ghostel-eshell-visual-command-mode))
+
+  (use-package em-term
+    :defer t
+    :config
+    (dolist (cmd '("btop" "nmtui" "alsamixer"))
+      (add-to-list 'eshell-visual-commands cmd)))
+#+end_src
+*** TODO Learn to use eshell properly
+TODO: improve =nij/eshell-env-indicator=
+This section configures Eshell to act as a TRAMP-native hub, and to have the zsh features we like (hopefully).
+The idea is that it should gradually grow to replace the need for other shell/terminal combos, except where a true terminal is actually needed.
+TODO: We NEED to configure detached.el for long-running commands. Can it play with eshell?
+#+begin_src emacs-lisp
+  (use-package eshell
+    :preface
+    ;; Usage: Type 'j thror', 'j girion', or 'j rt' in Eshell
+    (defun eshell/j (target)
+      "Quickly jump to a TRAMP target or bookmark."
+      (let ((path (cond
+                   ;; Thror (Ubuntu NAS) - Standard User
+                   ((member target '("thror" "t")) "/ssh:thror:/home/nij")
+                   
+                   ;; Thror - Root Access (TRAMP Multi-hop)
+                   ;; This hops via ssh:thror, then sudo:root on thror
+                   ((member target '("root-thror" "rt")) "/ssh:thror|sudo:thror:/root")
+
+                   ;; Girion (TrueNAS) - Admin/Docker Management
+                   ;; Note: Using ssh-nas-tunnel based on our SSH config
+                   ((member target '("girion" "g")) "/ssh:truenas_admin@ssh-nas-tunnel:/mnt/main-pool")
+                   
+                   ;; Fallback: acts like normal cd
+                   (t target))))
+        (eshell/cd path)
+        (eshell/echo (format "Warped to %s" path))))
+    (defun eshell/proxsh ()
+      "Open the SOCKS proxy tunnel asynchronously (to not block the eshell buffer)"
+      (start-process "proxy-tunnel" "*proxy-tunnel*" "ssh" "-N" "-D" "1080" "my-proxy-tunnel")
+      (eshell/echo "my-proxy-tunnel (defined in nix config) opened in background"))
+    :defer t)
+
+    ;; Smart Prompt (some cool starship-style stuff, shortening remote paths etc)
+  (use-package em-prompt
+    :preface
+    (defun nij/eshell-env-indicator ()
+      "Return a string indicating active Nix/Python environments."
+      ;; TODO: what about other environments?
+      (let ((env-str ""))
+        (when (getenv "IN_NIX_SHELL")
+          (setq env-str (concat env-str "❄ ")))
+        (when (getenv "VIRTUAL_ENV")
+          (setq env-str (concat env-str "🐍 ")))
+        (if (string-empty-p env-str)
+            ""
+          (propertize env-str 'face '(:foreground "#7dcfff"))))) ;tokyo night cyan
+    (defun nij/eshell-git-branch ()
+      "Return the current git branch natively using the built-in vc-git."
+      (when (and (not (file-remote-p default-directory))
+                 (vc-find-root default-directory ".git"))
+        (require 'vc-git)
+        (let ((branch (car (vc-git-branches))))
+          (when branch
+            (format "  %s" (propertize branch 'face '(:foreground "#bb9af7"))))))) ;tokyo night magenta
+    (defun nij/eshell-prompt ()
+      "Two-line prompt: [host] env directory branch, then the prompt char on a newline."
+      (concat
+       "\n"
+       ;; a: remote host indicator
+       (if-let* ((host (file-remote-p default-directory 'host)))
+           (propertize (format "[%s] " host) 'face '(:foreground "#f7768e")) "")
+       ;; b: env indicator (nix/direnv)
+       (nij/eshell-env-indicator)
+       ;; c: directory path
+       (propertize (abbreviate-file-name (eshell/pwd)) 'face '(:foreground "#7aa2f7" :weight bold))
+       ;; d: git branch
+       (or (nij/eshell-git-branch) "")
+       ;; e: root / non-root prompt character on the new line
+       (propertize (if (= (user-uid) 0) "\n# " "\n❯ ") 'face '(:foreground "#9ece6a"))))
+    :defer t
+    :custom (eshell-prompt-function #'nij/eshell-prompt))
+
+  (use-package em-dirs
+    :defer t
+    :custom (eshell-last-dir-ring-size 200))
+
+  (use-package eshell-syntax-highlighting
+    ;; make green and red command colours like zsh
+    :after eshell
+    :init (eshell-syntax-highlighting-global-mode 1))
+  
+  (use-package esh-autosuggest
+    ;; suggestions in 'ghost text' from our command history
+    :hook (eshell-mode)
+    :config
+    ;; to match Tokyo Night br-black in nixos config
+    (set-face-foreground 'company-preview-common "#414868"))
+
+#+end_src
+#+begin_src sh :tangle ./etc/eshell/aliases
+  # see ghostel-eshell and em-term for btop, nmtui etc
+  alias egrep egrep --color=auto $*
+  alias fgrep fgrep --color=auto $*
+  alias grep grep --color=auto $*
+  alias la ls -alh --color=auto -F $*
+  alias ll ls -lh --color=auto -F $*
+  alias ls ls --color=auto -F $*
+  alias wget wget -c $*
+  alias gs magit-status
+#+end_src
+*** TODO Detached
+TODO: eshell+detached.el is a potentially awesome replacement for ghostel+tmux for long-running commands or sessions on remote machines. It requires a small C program (dtach I think) to be installed on the remote machine.
+** **Portability** (Load Local Config)
+This block loads a machine-specific configuration file, =local.el=, if it exists. (We're not actually using this mechanism at present).
+This file is not part of the main config and should be added to .gitignore.
+It's used to set machine-specific variables, like file paths.
+#+begin_src emacs-lisp
+(load (locate-user-emacs-file "local.el") :noerror :nomessage)
+#+end_src
+* Vague thoughts and navel-gazing
+- I should consider other extensions to =org= - =org-roam= is an important one to look into
+- At some point, I should try and get music, video (=EMMS=?), IRC (=ERC=?), email (=mu4e=?), and =matrix= working.
+- There is also the telegram integration (=telega=?) and the recent whatsapp integration project
+- I'd also like to experiment with =EXWM= or the new River-based wm for wayland - Rua I think?
+
+* TODO fixing nixpkgs
+** TODO check all the remaining emacs.nix packages are needed
+* TODO Loose ends
+ * Try out (use-package-compute-statistics t) and then do M-x use-package-report to see what to improve?
+ * Built-in replacements for consult, embark, corfu/cape, doom-modeline? (doom-modeline might be easiest)
+ * Maybe we should also consider a minimum viable emacs config that uses no external packages, makes as few assumptions about its host environment as possible?
+ * Maybe we should consider a portable emacs setup for restrictive windows machines, that brings along things like compilers, git, etc?
+* Footer
+;; This sets a buffer-local hook to tangle the file on save.
+;; Because it is in 'Local Variables', it applies only to this file.
+# Local Variables:
+# eval: (add-hook 'after-save-hook #'org-babel-tangle nil t)
+# End:  
