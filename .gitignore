@@ -1,13 +1,11 @@
 
 *~
 auto-save-list/
+custom.el
 elfeed/
 eln-cache/
-elpa/
-elpaca/
 emms/
 etc/
-projectile-bookmarks.eld
 tramp
 transient/
 tree-sitter/
