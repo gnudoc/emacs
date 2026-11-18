@@ -215,10 +215,10 @@ printf '\e]777;notify;%s;%s\e\\' "Title" "Body of the message"
     (defun nij/startup-notif ()
       "When we do `nij/restart-emacs', it restarts silently as a systemd service.
   So let the user know it's done."
-        (when (daemonp)
-          (notifications-notify
-           :title "Emacs Daemon Up"
-           :body (format "Ready in %s" (emacs-init-time "%.2f seconds")))))
+      (when (daemonp)
+        (notifications-notify
+         :title "Emacs Daemon Up"
+         :body (format "Ready in %s" (emacs-init-time "%.2f seconds")))))
     :hook (emacs-startup . nij/startup-notif)
     :commands notifications-notify)
 #+end_src
@@ -252,7 +252,7 @@ To live edit it (or any other defvar-keymap):
                                        (buffer-modified-p buf)))
                     (buffer-list))
       (unless (yes-or-no-p "Unsaved buffer(s); restart anyway? ")
-          (user-error "Custom restart function aborted due to unsaved buffer(s)")))
+        (user-error "Custom restart function aborted due to unsaved buffer(s)")))
     (if (daemonp)
         (let ((default-directory "/"))
           (call-process "systemctl" nil 0 nil "--user" "--no-block" "restart" "emacs.service"))
@@ -300,11 +300,11 @@ To live edit it (or any other defvar-keymap):
   ;; Systemd and Journalctl are under C-c n as well
   (use-package daemons
     :bind (:map nij-system-map
-           ("s" . daemons)))
-  
+                ("s" . daemons)))
+
   (use-package journalctl-mode
     :bind (:map nij-system-map
-           ("j" . journalctl)))
+                ("j" . journalctl)))
 
   (defvar-keymap nij-open-apps-map
     :doc "Keys for opening mini-apps")
@@ -318,22 +318,22 @@ Identify where in a buffer I was most recently editing, using the =buffer-undo-l
 ~C-u C-SPC~ goes back to where point was.
 #+begin_src emacs-lisp
   (defun nij/goto-last-change ()
-      "Move point to the most recent change in this buffer.
+    "Move point to the most recent change in this buffer.
     The mark is left where point was."
-      (interactive)
-      (let ((pos (and (listp buffer-undo-list)   ; t means undo is off in this buffer
-                      (seq-some
-                       (lambda (entry)
-                         (pcase entry
-                           ;; insertion: (BEG . END)
-                           (`(,(pred integerp) . ,(and (pred integerp) end)) end)
-                           ;; deletion: (TEXT . POSITION), negative if point was at the end
-                           (`(,(pred stringp) . ,(and (pred integerp) pos)) (abs pos))))
-                       buffer-undo-list))))
-        (unless pos
-          (user-error "No change recorded in this buffer"))
-        (push-mark)
-        (goto-char pos)))
+    (interactive)
+    (let ((pos (and (listp buffer-undo-list)   ; t means undo is off in this buffer
+                    (seq-some
+                     (lambda (entry)
+                       (pcase entry
+                         ;; insertion: (BEG . END)
+                         (`(,(pred integerp) . ,(and (pred integerp) end)) end)
+                         ;; deletion: (TEXT . POSITION), negative if point was at the end
+                         (`(,(pred stringp) . ,(and (pred integerp) pos)) (abs pos))))
+                     buffer-undo-list))))
+      (unless pos
+        (user-error "No change recorded in this buffer"))
+      (push-mark)
+      (goto-char pos)))
 
   (keymap-set goto-map "l" #'nij/goto-last-change) ; M-g l
 #+end_src
@@ -381,7 +381,7 @@ Also worth looking at =C-x w t=, as well as the =C-x w o=, =C-x w r= and =C-x w 
         (display-buffer-reuse-window display-buffer-in-side-window); the 2 possible actions
         (side . right) (slot . 1) (window-width . 0.4)
         (window-parameters (no-delete-other-windows . t)))
-       ; top right, 40% width; help etc, eshell
+                                          ; top right, 40% width; help etc, eshell
        ((or (derived-mode . help-mode)
             (derived-mode . Info-mode)
             "\\*\\(?:.+-\\)?eshell\\*" ; because eshell shows its buffer before setting the mode
@@ -442,9 +442,9 @@ In the minibuffer: =C-n= / =C-p= or the up and down arrows pick a candidate, =RE
 #+begin_src emacs-lisp
   (use-package minibuffer
     :bind (:map minibuffer-local-completion-map
-           ("SPC" . nil)
-           ("C-n" . minibuffer-next-completion)
-           ("C-p" . minibuffer-previous-completion))
+                ("SPC" . nil)
+                ("C-n" . minibuffer-next-completion)
+                ("C-p" . minibuffer-previous-completion))
     :custom
     (completion-eager-display t)
     (completion-eager-update t)
@@ -656,13 +656,13 @@ The clang-tidy checks are no longer scaffolded into every project as a =.clangd=
 #+begin_src emacs-lisp
   (defvar nij/cpp-template-directory (locate-user-emacs-file "etc/templates/cpp/")
     "Directory holding the files that `nij/create-cpp-project' copies.
-  They are tangled from the Templates blocks in Emacs.org.")
+    They are tangled from the Templates blocks in Emacs.org.")
 
   (defun nij/create-cpp-project ()
     "Scaffold a C++23 project (CMake, Ninja, Nix dev shell) in this directory.
-  Every file in `nij/cpp-template-directory' is copied here, with
-  {{project}} replaced by the name of this directory.  A template called
-  dot-NAME becomes .NAME.  Files that already exist are left alone."
+    Every file in `nij/cpp-template-directory' is copied here, with
+    {{project}} replaced by the name of this directory.  A template called
+    dot-NAME becomes .NAME.  Files that already exist are left alone."
     (interactive)
     (unless (file-directory-p nij/cpp-template-directory)
       (user-error "No templates in %s; save Emacs.org to tangle them"
@@ -702,6 +702,30 @@ The clang-tidy checks are no longer scaffolded into every project as a =.clangd=
 
   (keymap-set project-prefix-map "n" #'nij/create-cpp-project)
   (keymap-set project-prefix-map "P" #'nij/cmake-configure-preset)
+
+  (use-package c-ts-mode
+    :preface
+    (defun nij/cpp-run ()
+      "Build and run the program that this buffer's file belongs to.
+  The project's build directory has to mirror its source tree: the
+  program for ch6/ex03.cpp is build/ch6/ex03, and every file in
+  ch6/calculator/ belongs to build/ch6/calculator.  A file at the top of
+  a project belongs to the program named after the project's directory."
+      (interactive)
+      (let* ((default-directory (project-root (project-current t)))
+             (file (file-relative-name buffer-file-name))
+             (program (pcase (file-name-split file)
+                        (`(,_) (file-name-nondirectory
+                                (directory-file-name default-directory)))
+                        (`(,_ ,_) (file-name-sans-extension file))
+                        (_ (directory-file-name (file-name-directory file)))))
+             ;; `compile' remembers its command; keep C-x p c offering the usual one
+             (compile-command compile-command))
+        ;; t: a comint buffer, so that the program can read what I type
+        (compile (format "ninja -C build %1$s && build/%1$s" program) t)))
+    :bind (:map c-ts-base-mode-map
+                ("C-c x" . nij/cpp-run)))
+
 
   (use-package gdb-mi
     :defer t
