@@ -639,10 +639,10 @@ Its keys are under =C-c r=. =C-c l= is taken, globally, by =org-store-link=.
     ((c-ts-base-mode nix-mode) . eglot-ensure)   ; lisps don't want LSPs
     (eglot-managed-mode . nij/eglot-format-on-save)
     :bind (:map eglot-mode-map
-           ("C-c r a" . eglot-code-actions)
-           ("C-c r r" . eglot-rename)
-           ("C-c r f" . eglot-format)
-           ("C-c r o" . eglot-code-action-organize-imports))
+                ("C-c r a" . eglot-code-actions)
+                ("C-c r r" . eglot-rename)
+                ("C-c r f" . eglot-format)
+                ("C-c r o" . eglot-code-action-organize-imports))
     :config
     (which-key-add-keymap-based-replacements eglot-mode-map "C-c r" "Refactor etc")
     ;; A plain (buffer-local) variable, not a user option, hence `setq-default'
@@ -745,17 +745,17 @@ To change what every new project gets, edit a block. To add a file, add a block.
   set(CMAKE_CXX_STANDARD_REQUIRED ON)
   add_executable({{project}} main.cpp)
   target_compile_options({{project}} PRIVATE
-      -Wall
-      -Wextra
-      -Wpedantic
-      -Wshadow
-      -Wconversion
-      -Wsign-conversion
-      -Werror
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Wshadow
+    -Wconversion
+    -Wsign-conversion
+    -Werror
   )
   if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-      target_compile_options({{project}} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-      target_link_options({{project}} PRIVATE -fsanitize=address,undefined)
+    target_compile_options({{project}} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options({{project}} PRIVATE -fsanitize=address,undefined)
   endif()
 #+end_src
 #+begin_src json :tangle ./etc/templates/cpp/CMakePresets.json
@@ -778,8 +778,8 @@ To change what every new project gets, edit a block. To add a file, add a block.
   #include <iostream>
 
   int main() {
-      std::cout << "Hello from {{project}}!\n";
-      return 0;
+    std::cout << "Hello from {{project}}!\n";
+    return 0;
   }
 #+end_src
 #+begin_src nix :tangle ./etc/templates/cpp/flake.nix
@@ -790,13 +790,13 @@ To change what every new project gets, edit a block. To add a file, add a block.
       devShells.x86_64-linux.default = let
         pkgs = nixpkgs.legacyPackages.x86_64-linux;
       in pkgs.mkShell.override { stdenv = pkgs.llvmPackages_latest.stdenv; } {
-        packages = with pkgs; [
-          cmake
-          ninja
-          llvmPackages_latest.clang-tools
-          gdb
-        ];
-      };
+                                   packages = with pkgs; [
+                                     cmake
+                                     ninja
+                                     llvmPackages_latest.clang-tools
+                                     gdb
+                                   ];
+                                 };
     };
   }
 #+end_src
@@ -908,7 +908,7 @@ Dired's options are spread over three libraries, hence three blocks.
           (select-window other-win)
           (find-file file))))
     :bind (:map dired-mode-map
-           ("C-S-o" . nij/dired-open-in-next-window))
+                ("C-S-o" . nij/dired-open-in-next-window))
     :custom
     (dired-listing-switches "-alh --group-directories-first")
     (dired-dwim-target t)
@@ -961,8 +961,8 @@ I am self-hosting miniflux, which exports a fever api that elfeed can use.
     ;; Set a default search filter (e.g., unread articles from the last month)
     (elfeed-search-filter "@1-month-ago +unread")
     (elfeed-feeds '(("fever+https://nij@flux.gnudoc.uk"
-                          :api-url "https://flux.gnudoc.uk/fever/"
-                          :use-authinfo t)))
+                     :api-url "https://flux.gnudoc.uk/fever/"
+                     :use-authinfo t)))
     (elfeed-use-curl t)
     (elfeed-log-level 'info)) ; 'debug is helpful for initial connection testing
 
@@ -1006,8 +1006,7 @@ Why not vterm? No external module needed, so that's already a good enough reason
                    ("consult-ripgrep" consult-ripgrep)
                    ("project-find-file" project-find-file)
                    ("ediff" ediff)))
-      (add-to-list 'ghostel-eval-cmds cmd))
-    )
+      (add-to-list 'ghostel-eval-cmds cmd)))
 
   (use-package ghostel-eshell
     :hook (eshell-load . ghostel-eshell-visual-command-mode))
@@ -1051,7 +1050,7 @@ TODO: We NEED to configure detached.el for long-running commands. Can it play wi
       (eshell/echo "my-proxy-tunnel (defined in nix config) opened in background"))
     :defer t)
 
-    ;; Smart Prompt (some cool starship-style stuff, shortening remote paths etc)
+  ;; Smart Prompt (some cool starship-style stuff, shortening remote paths etc)
   (use-package em-prompt
     :preface
     (defun nij/eshell-env-indicator ()
@@ -1099,7 +1098,7 @@ TODO: We NEED to configure detached.el for long-running commands. Can it play wi
     ;; make green and red command colours like zsh
     :after eshell
     :init (eshell-syntax-highlighting-global-mode 1))
-  
+
   (use-package esh-autosuggest
     ;; suggestions in 'ghost text' from our command history
     :hook (eshell-mode)
