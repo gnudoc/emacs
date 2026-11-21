@@ -351,7 +351,7 @@ Identify where in a buffer I was most recently editing, using the =buffer-undo-l
 #+begin_src emacs-lisp
   (defun nij/goto-last-change ()
     "Move point to the most recent change in this buffer.
-    The mark is left where point was."
+  The mark is left where point was."
     (interactive)
     (let ((pos (and (listp buffer-undo-list)   ; t means undo is off in this buffer
                     (seq-some
@@ -390,9 +390,9 @@ Common keys: 'P' (pair), 't' (trust), 'c' (connect), 'd' (disconnect), 'k' (kill
   (use-package bluetooth
     :bind (:map nij-open-apps-map ("b" . bluetooth-list-devices)))
 #+end_src
-* More UI and UX Config
+* TODO (I,L) More UI and UX Config
 This section mostly gets tangled to init.el, except for the sh block that goes to etc/eshell/aliases, and the C++ templates that tangle to etc/templates/cpp/
-** Theming, Completion and Help
+** TODO (I) Theming, Completion and Help
 *** Window Layout
 I like a frame to have one main window to the left, and a column of small windows on the right - a bit like a WM master-stack layout.
 The right-hand column is a good place for help-type buffers and compile-type buffers.
@@ -413,7 +413,8 @@ Also worth looking at =C-x w t=, as well as the =C-x w o=, =C-x w r= and =C-x w 
         (display-buffer-reuse-window display-buffer-in-side-window); the 2 possible actions
         (side . right) (slot . 1) (window-width . 0.4)
         (window-parameters (no-delete-other-windows . t)))
-                                          ; top right, 40% width; help etc, eshell
+
+       ;; top right, 40% width; help etc, eshell
        ((or (derived-mode . help-mode)
             (derived-mode . Info-mode)
             "\\*\\(?:.+-\\)?eshell\\*" ; because eshell shows its buffer before setting the mode
@@ -431,7 +432,7 @@ Take suggestions from [[https://github.com/hlissner/emacs-doom-themes][doom-them
   (use-package doom-themes
     :config (load-theme 'doom-tokyo-night t))
 #+end_src
-*** TODO Modeline
+*** TODO (Implement My Own) Modeline
 Another element of doom emacs that's nice is [[https://github.com/seagle0128/doom-modeline][modeline]].
 TODO: Can I improve it, make it look nicer and / or make it more functional?
 TODO: Or should I make my own version entirely? The built-in pieces are =mode-line-format= and, new in 31, =mode-line-collapse-minor-modes=.
@@ -693,13 +694,13 @@ The clang-tidy checks are no longer scaffolded into every project as a =.clangd=
 #+begin_src emacs-lisp
   (defvar nij/cpp-template-directory (locate-user-emacs-file "etc/templates/cpp/")
     "Directory holding the files that `nij/create-cpp-project' copies.
-    They are tangled from the Templates blocks in Emacs.org.")
+  They are tangled from the Templates blocks in Emacs.org.")
 
   (defun nij/create-cpp-project ()
     "Scaffold a C++23 project (CMake, Ninja, Nix dev shell) in this directory.
-    Every file in `nij/cpp-template-directory' is copied here, with
-    {{project}} replaced by the name of this directory.  A template called
-    dot-NAME becomes .NAME.  Files that already exist are left alone."
+  Every file in `nij/cpp-template-directory' is copied here, with
+  {{project}} replaced by the name of this directory.  A template called
+  dot-NAME becomes .NAME.  Files that already exist are left alone."
     (interactive)
     (unless (file-directory-p nij/cpp-template-directory)
       (user-error "No templates in %s; save Emacs.org to tangle them"
@@ -893,21 +894,25 @@ Its README asks for it to be the last global mode switched on. =emacs-startup-ho
     ;; work if you're ssh'd.
     (envrc-update-on-eshell-directory-change nil))
 #+end_src
-** TODO Project.el
-I still need to learn how to use this - at the moment I'm not convinced that I'm using it properly. The idea is to automatically define a directory and its subdirs as a single workspace. By default Project goes up the dir tree and the project dir is the first dir containing a .git (ie it's the git repo). But we can set additional identifiers too, so here we say that if we find a .envrc, that defines a mini-project, and we should treat that level as the root of the Project.
+** Project.el
+Automatically define a directory and its subdirs as a single workspace. By default Project goes up the dir tree and the project dir is the first dir containing a .git (ie it's the git repo). But we can set additional identifiers too, so here we say that if we find a .envrc, that defines a mini-project, and we should treat that level as the root of the Project.
 =C-x p p= - switch to any of the projects Project already knows about
 =C-x p f= - C-x C-f but looks throughout the project
 =C-x p d= - C-x d but at the root of the project
 =C-x p c= - M-x compile but at the project root
 =C-x p e= - M-x eshell but at the project root
 =C-x p b= - C-x b but only shows the buffers associated with the current project
-=C-x p g= - search regexp across all the files of the project
-=C-x p r= - replace regexp across all the files of the project
+=C-x p g= - search regexp across all the files of the project   *Don't Forget These Ones*
+=C-x p r= - replace regexp across all the files of the project  *Don't Forget These Ones*
 #+begin_src emacs-lisp
   (use-package project
     :defer t
     :custom
     (project-vc-extra-root-markers '(".envrc")))
+  (use-package xref
+    :defer t
+    :custom
+    (xref-search-program 'ripgrep)) ; use rg for C-x p g and C-x p r
 #+end_src
 ** Version Control (Magit)
 Forge, which helps magit use git forges like github, can read authinfo for authentication
@@ -984,7 +989,7 @@ Three of the options in the first block aren't TRAMP's own: =password-cache-expi
     :custom
     (tramp-use-connection-share nil))        ; leave Control* and Proxy* options to my ssh config
 #+end_src
-** TODO RSS
+** TODO (Learn) RSS
 TODO: Learn to use elfeed
 I am self-hosting miniflux, which exports a fever api that elfeed can use.
 #+begin_src emacs-lisp
@@ -1009,9 +1014,9 @@ I am self-hosting miniflux, which exports a fever api that elfeed can use.
     (elfeed-protocol-enable))
 
 #+end_src
-** TODO PDF Tools
+** PDF Tools
 From [[https://github.com/vedang/pdf-tools][PDF Tools]] - it is awesome, but it needs libpoppler, poppler-glib and epdfinfo on the host system.
-Should we replace this? Is emacs-reader ready? Is the inbuilt docview tool good enough now?
+Should we replace this with emacs-reader at some point in the future?
 #+begin_src emacs-lisp
   (use-package pdf-tools
     :init (pdf-loader-install)
@@ -1021,8 +1026,9 @@ Should we replace this? Is emacs-reader ready? Is the inbuilt docview tool good 
 #+end_src
 ** TODO Terminals
 *** Ghostel
-A terminal based on Ghostty, which is written in zig and uses the kitty display stuff. Cross-platform, doesn't need to compile the external module on platforms where you can't compile.
-Why not vterm? No external module needed, so that's already a good enough reason, but it's supposedly faster than vterm, and supposedly prettier (something about colours and fonts rendering, and inline images), and  supposedly integrates better with emacs - more modes (not just normal mode and copy mode), understands more elisp, and emacs understands what directory it's in, and understands where the prompts in the terminal are. Supposedly we might get the benefits we hoped for from EAT, and possibly even the benefits of being emacs-native that eshell has. A basic config of (use-package ghostel) is already functional, if our experiments get messy.
+A terminal based on Ghostty, which is written in zig and uses the kitty display stuff. Cross-platform, no external module needed on platforms where you can't compile.
+Faster than vterm, and supposedly prettier (something about colours and fonts rendering, and inline images).
+Integrates better with emacs - more modes (not just normal mode and copy mode), understands more elisp, emacs knows its pwd, and understands where the prompts in the terminal are.
 #+begin_src emacs-lisp
   (use-package ghostel
     :preface
@@ -1052,7 +1058,7 @@ Why not vterm? No external module needed, so that's already a good enough reason
     (dolist (cmd '("btop" "nmtui" "alsamixer"))
       (add-to-list 'eshell-visual-commands cmd)))
 #+end_src
-*** TODO Learn to use eshell properly
+*** TODO (Learn, Improve) eshell
 TODO: improve =nij/eshell-env-indicator=
 This section configures Eshell to act as a TRAMP-native hub, and to have the zsh features we like (hopefully).
 The idea is that it should gradually grow to replace the need for other shell/terminal combos, except where a true terminal is actually needed.
@@ -1060,7 +1066,6 @@ TODO: We NEED to configure detached.el for long-running commands. Can it play wi
 #+begin_src emacs-lisp
   (use-package eshell
     :preface
-    ;; Usage: Type 'j thror', 'j girion', or 'j rt' in Eshell
     (defun eshell/j (target)
       "Quickly jump to a TRAMP target or bookmark."
       (let ((path (cond
@@ -1068,11 +1073,9 @@ TODO: We NEED to configure detached.el for long-running commands. Can it play wi
                    ((member target '("thror" "t")) "/ssh:thror:/home/nij")
                    
                    ;; Thror - Root Access (TRAMP Multi-hop)
-                   ;; This hops via ssh:thror, then sudo:root on thror
                    ((member target '("root-thror" "rt")) "/ssh:thror|sudo:thror:/root")
 
                    ;; Girion (TrueNAS) - Admin/Docker Management
-                   ;; Note: Using ssh-nas-tunnel based on our SSH config
                    ((member target '("girion" "g")) "/ssh:truenas_admin@ssh-nas-tunnel:/mnt/main-pool")
                    
                    ;; Fallback: acts like normal cd
@@ -1084,8 +1087,6 @@ TODO: We NEED to configure detached.el for long-running commands. Can it play wi
       (start-process "proxy-tunnel" "*proxy-tunnel*" "ssh" "-N" "-D" "1080" "my-proxy-tunnel")
       (eshell/echo "my-proxy-tunnel (defined in nix config) opened in background"))
     :defer t)
-
-  ;; Smart Prompt (some cool starship-style stuff, shortening remote paths etc)
   (use-package em-prompt
     :preface
     (defun nij/eshell-env-indicator ()
@@ -1176,9 +1177,7 @@ It's used to set machine-specific variables, like file paths.
 - There is also the telegram integration (=telega=?) and the recent whatsapp integration project
 - I'd also like to experiment with =EXWM= or the new River-based wm for wayland - Rua I think?
 
-* TODO fixing nixpkgs
-** TODO check all the remaining emacs.nix packages are needed
-* TODO Loose ends
+* TODO (Implement) Loose ends
  * Try out (use-package-compute-statistics t) and then do M-x use-package-report to see what to improve?
  * Built-in replacements for consult, embark, corfu/cape, doom-modeline? (doom-modeline might be easiest)
  * Maybe we should also consider a minimum viable emacs config that uses no external packages, makes as few assumptions about its host environment as possible?
