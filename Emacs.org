@@ -478,6 +478,8 @@ In the minibuffer: =C-n= / =C-p= or the up and down arrows pick a candidate, =RE
                 ("C-n" . minibuffer-next-completion)
                 ("C-p" . minibuffer-previous-completion))
     :custom
+    (completion-styles '(orderless basic))
+    (completion-category-overrides '((file (styles . (basic partial-completion)))))
     (completion-eager-display t)
     (completion-eager-update t)
     (completions-format 'one-column)
@@ -492,9 +494,6 @@ In the minibuffer: =C-n= / =C-p= or the up and down arrows pick a candidate, =RE
 The completion style, allowing flexible, out-of-order matching
 #+begin_src emacs-lisp
   (use-package orderless
-    :custom
-    (completion-styles '(orderless basic))
-    (completion-category-overrides '((file (styles . (basic partial-completion)))))
     :config
     ;; A plain variable, not a user option, hence `setq'
     (setq completion-category-defaults nil))
