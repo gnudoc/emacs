@@ -1125,6 +1125,14 @@ TODO: We NEED to configure detached.el for long-running commands. Can it play wi
     :defer t
     :custom (eshell-prompt-function #'nij/eshell-prompt))
 
+  (use-package em-hist
+    :bind (:map eshell-hist-mode-map
+                ("M-r" . consult-history))
+    :custom
+    (eshell-history-size 10000)
+    (eshell-hist-ignoredups 'erase)
+    (eshell-history-append t))
+
   (use-package em-dirs
     :defer t
     :custom (eshell-last-dir-ring-size 200))
