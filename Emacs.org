@@ -51,9 +51,10 @@ Let's try and keep a readable, maintainable, modern, consistent style.
 | C-x p n | scaffold a C++ project here        |
 | C-x p P | run cmake configure preset         |
 | C-S-o   | dired: open in next window         |
+| C-c x   | nij/cpp-run - standalone compile   |
 | C-=     | pdf-tools zoom in                  |
 | C--     | pdf-tools zoom out                 |
-|-        |                                    |
+|---------+------------------------------------|
 * Early-Init Config
 This section is tangled to =early-init.el=, which runs *before* package initialization and before the first frame is drawn.
 #+HEADER: :tangle ./early-init.el
@@ -222,13 +223,27 @@ printf '\e]777;notify;%s;%s\e\\' "Title" "Body of the message"
     :hook (emacs-startup . nij/startup-notif)
     :commands notifications-notify)
 #+end_src
+*** Running commands in a compile buffer
+Several of my commands use a buffer created by =compile= to run a shell command
+=compile= likes to change its global default to whatever's just been run, and this is not safe.
+Otherwise a nixos switch or a cmake configure becomes the global default and can be run inappropriately.
+#+begin_src emacs-lisp
+  (defun nij/compile (command &optional comint)
+    "Run COMMAND like `compile', without changing `compile-command'.
+  The command runs in `default-directory'. With a non-nil COMINT,
+  the buffer accepts input.
+  Return the compilation buffer."
+    (let ((compile-command compile-command)) (compile command comint)))
+
+  (use-package ansi-color
+    :hook (compilation-filter . ansi-color-compilation-filter))
+#+end_src
 *** Personal Bindings
 Collection of some useful keybindings.
 Beware of adding more keys to a defvar-keymap in a live session - the variable won't get changed as it already exists.
 To live edit it (or any other defvar-keymap):
-- open the block with =C-c '=
-- put point in the defvar-keymap form
-- do =C-M-x (eval-defun)=
+- =M-: (keymap-set nij-system-map  "x" #'some-command)=
+- then add ="x" #'some-command= to the defvar-keymap
 #+begin_src emacs-lisp
   ;; ibuffer is just better than standard list-buffers
   (use-package ibuffer
@@ -269,24 +284,24 @@ To live edit it (or any other defvar-keymap):
   (defun nij/nixos-rebuild-switch ()
     "Run NixOS rebuild in a compilation buffer."
     (interactive)
-    (compile "sudo nixos-rebuild switch --flake ~/.config/nixos-config" t))
+    (nij/compile "sudo nixos-rebuild switch --flake ~/.config/nixos-config" t))
 
   (defun nij/nix-flake-update ()
     "Update flake locks in a compilation buffer."
     (interactive)
     (let ((default-directory "~/.config/nixos-config/"))
-      (compile "nix flake update")))
+      (nij/compile "nix flake update")))
 
   (defun nij/nix-garbage-collect ()
     "Run Nix garbage collection in a compilation buffer."
     (interactive)
-    (compile "sudo nix-collect-garbage -d" t))
+    (nij/compile "sudo nix-collect-garbage -d" t))
 
   (defun nij/system-backup ()
     "Run the system backup script manually using a comint buffer.
-  See /etc/systemd/system/system-backup.service for more."
+    See /etc/systemd/system/system-backup.service for more."
     (interactive)
-    (compile "sudo systemctl start system-backup.service; sudo journalctl --unit=system-backup.service --lines=40 --no-pager" t))
+    (nij/compile "sudo systemctl start system-backup.service; sudo journalctl --unit=system-backup.service --lines=40 --no-pager" t))
 
   (defvar-keymap nij-system-map
     :doc "Keys relating to common admin tasks for the underlying system"
@@ -686,7 +701,7 @@ The clang-tidy checks are no longer scaffolded into every project as a =.clangd=
       (message "C++ project '%s' scaffolded." name)
       ;; Build the dev shell in a compilation buffer so we can watch, then
       ;; pick up the new environment and open main.cpp
-      (with-current-buffer (compile "direnv allow && direnv exec . true")
+      (with-current-buffer (nij/compile "direnv allow && direnv exec . true")
         (add-hook 'compilation-finish-functions
                   (lambda (_buffer status)
                     (when (string-prefix-p "finished" status)
@@ -698,7 +713,7 @@ The clang-tidy checks are no longer scaffolded into every project as a =.clangd=
     "Run 'cmake --preset default' in the project root."
     (interactive)
     (let ((default-directory (project-root (project-current t))))
-      (compile "cmake --preset default")))
+      (nij/compile "cmake --preset default")))
 
   (keymap-set project-prefix-map "n" #'nij/create-cpp-project)
   (keymap-set project-prefix-map "P" #'nij/cmake-configure-preset)
@@ -718,11 +733,9 @@ The clang-tidy checks are no longer scaffolded into every project as a =.clangd=
                         (`(,_) (file-name-nondirectory
                                 (directory-file-name default-directory)))
                         (`(,_ ,_) (file-name-sans-extension file))
-                        (_ (directory-file-name (file-name-directory file)))))
-             ;; `compile' remembers its command; keep C-x p c offering the usual one
-             (compile-command compile-command))
+                        (_ (directory-file-name (file-name-directory file))))))
         ;; t: a comint buffer, so that the program can read what I type
-        (compile (format "ninja -C build %1$s && build/%1$s" program) t)))
+        (nij/compile (format "ninja -C build %1$s && build/%1$s" program) t)))
     :bind (:map c-ts-base-mode-map
                 ("C-c x" . nij/cpp-run)))
 
