@@ -268,19 +268,27 @@ To live edit it (or any other defvar-keymap):
     (find-file (locate-user-emacs-file "Emacs.org")))
 
   (defun nij/restart-emacs ()
-    "Save some buffers, warn re unsaved ones and restart emacs.
-  If we're daemonised then restart via systemd, else the normal `restart-emacs'"
+    "Restart Emacs, first asking about anything that would be lost.
+  As a daemon, restart through systemd.  Otherwise use `restart-emacs',
+  which asks the same questions itself."
     (interactive)
-    (save-some-buffers)
-    (when (seq-some (lambda (buf) (and (buffer-file-name buf)
-                                       (buffer-modified-p buf)))
-                    (buffer-list))
-      (unless (yes-or-no-p "Unsaved buffer(s); restart anyway? ")
-        (user-error "Custom restart function aborted due to unsaved buffer(s)")))
-    (if (daemonp)
-        (let ((default-directory "/"))
-          (call-process "systemctl" nil 0 nil "--user" "--no-block" "restart" "emacs.service"))
-      (restart-emacs)))
+    (if (not (daemonp))
+        (restart-emacs)
+      (save-some-buffers)
+      (when (and (seq-some (lambda (buf) (and (buffer-file-name buf)
+                                              (buffer-modified-p buf)))
+                           (buffer-list))
+                 (not (yes-or-no-p "Unsaved buffer(s); restart anyway? ")))
+        (user-error "Custom restart cancelled: unsaved buffer(s)"))
+      (when (and (seq-some (lambda (proc) (and (process-live-p proc)
+                                               (process-query-on-exit-flag proc)))
+                           (process-list))
+                 (not (yes-or-no-p "Active process(es); restart anyway? ")))
+        (user-error "Custom restart cancelled: active process(es)"))
+      (unless (run-hook-with-args-until-failure 'kill-emacs-query-functions)
+        (user-error "Restart cancelled"))
+      (let ((default-directory "/"))
+        (call-process "systemctl" nil 0 nil "--user" "--no-block" "restart" "emacs.service"))))
 
   (defvar-keymap nij-emacs-config-map
     :doc "Keys relating to the configuration of Emacs itself"
