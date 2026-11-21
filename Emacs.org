@@ -535,7 +535,13 @@ Contextual items for the completion results
 *** Helpful replaced with built-in help.
 [[https://github.com/Wilfred/helpful][Helpful]] is really not needed anymore. The inbuilt C-h keys  (describe-* commands) do the job really well.
 C-h ={a,f,k,s,u,v,x}= are all quite useful. =s= and =i= in help buffers is also really useful.
-** TODO Org Mode
+
+#+begin_src emacs-lisp
+  (use-package help
+    :custom (help-window-select t))
+
+#+end_src
+** TODO (Learn) Org Mode
 The famous magic [[https://orgmode.org][Org Mode]]. All sorts of functions. Rich doc editing, project planning, task/time tracking, literate coding, blogging engine, and more.
 TODO I definitely need to learn to use org-mode well.
 *** Basic Config
