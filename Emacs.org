@@ -119,16 +119,25 @@ By default, packages dump various files and dirs into =.emacs.d/= or =.config/em
 =no-littering-theme-backups= centralises backup and autosave files to =var/backup/=. However, for /sudo::/path/to/file, this would copy root-owned files to my $HOME, probably not what I want.
 #+begin_src emacs-lisp
   (use-package no-littering
-    :preface
-    (defun nij/backup-enable-p (name)
-      "Return non-nil if file NAME should be backed up.
-  Like `normal-backup-enable-predicate', but not for a file opened
-  using TRAMP sudo/su/doas."
-      (and (normal-backup-enable-predicate name)
-           (not (member (file-remote-p name 'method) '("su" "sudo" "doas")))))
-    :config
-    (no-littering-theme-backups)
-    (setq backup-enable-predicate #'nij/backup-enable-p))
+  :preface
+  (defun nij/privileged-file-p (name)
+    "Return non-nil if NAME is a file opened through TRAMP's su, sudo or doas.
+For a multi-hop name such as /ssh:host|sudo:host:/etc/x, the last hop
+decides."
+    (member (file-remote-p name 'method) '("su" "sudo" "doas")))
+  (defun nij/backup-enable-p (name)
+    "Like `normal-backup-enable-predicate', but never back up a privileged file."
+    (and (normal-backup-enable-predicate name)
+         (not (nij/privileged-file-p name))))
+  (defun nij/no-auto-save-for-privileged-file ()
+    "Turn off auto-saving if this buffer visits a privileged file."
+    (when (nij/privileged-file-p buffer-file-name)
+      (auto-save-mode -1)))
+  :config
+  (no-littering-theme-backups)
+  (setq backup-enable-predicate #'nij/backup-enable-p)
+  ;; add-hook, not :hook: :hook would make this whole block lazy
+  (add-hook 'find-file-hook #'nij/no-auto-save-for-privileged-file))
 #+end_src
 *** C Core Settings
 Some settings that belong to the C core, or core libraries that are always loaded.
