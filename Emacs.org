@@ -113,6 +113,25 @@ This section configures core Emacs behavior, fonts, and helper functions. Start 
           (unless (custom-variable-p symbol)
             (push symbol suspects))))
       (message "Not user options: %S" suspects)))
+
+  (defun nij/audit-packages ()
+    "Find `use-package' blocks in init.el whose library Emacs can't find.
+  Run it after a restart. Anything listed is missing from emacs.nix or
+  is a block named after something that isn't a library."
+    (interactive)
+    (let (missing)
+      (with-temp-buffer
+        (insert-file-contents user-init-file)
+        (condition-case nil
+                         (while t ; the loop breaks when the end-of-file is hit
+                           (let ((form (read (current-buffer)))) ; read 'user-init-file' form-by-form
+                             (when (eq (car-safe form) 'use-package)
+                               (let ((name (cadr form)))
+                                 (unless (or (eq name 'emacs)
+                                             (locate-library (symbol-name name)))
+                                   (push name missing))))))
+                         (end-of-file nil))) ; here's the condition to break the loop
+      (message "No library found for %S - check emacs.nix if non-nil" (nreverse missing))))
 #+end_src
 *** No Littering
 By default, packages dump various files and dirs into =.emacs.d/= or =.config/emacs/= - let's make them use ./var and ./etc
