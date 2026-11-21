@@ -8,7 +8,7 @@ Let's try and keep a readable, maintainable, modern, consistent style.
  * Make 1 use-package block per library, and the name is determined by the options being set (do C-h v on an option).
    * That lets us use =nij/audit-custom=.
  * Keyword order:
-   preface, after/defer/demand, init, hook, mode, bind, commands, custom, then config.
+   preface, after/defer/demand, init, hook, mode, bind, commands, custom, custom-face then config.
  * Helper functions use the nij/ namespace, and live in the preface of their own block rather than being gathered together
  * Global minor-modes - do =:init (foo-mode 1)= so that it runs even if the rest of the block is lazy.
  * =defcustom= options go in :custom. Plain variables are =:config (setq foo 42)=. :custom values don't call the package's own functions
@@ -1129,12 +1129,12 @@ TODO: We NEED to configure detached.el for long-running commands. Can it play wi
     :after eshell
     :init (eshell-syntax-highlighting-global-mode 1))
 
-  (use-package esh-autosuggest
+  (use-package capf-autosuggest
     ;; suggestions in 'ghost text' from our command history
     :hook (eshell-mode)
-    :config
+    :custom-face
     ;; to match Tokyo Night br-black in nixos config
-    (set-face-foreground 'company-preview-common "#414868"))
+    (capf-autosuggest-face ((t (:foreground "#414868")))))
 
 #+end_src
 #+begin_src sh :tangle ./etc/eshell/aliases
